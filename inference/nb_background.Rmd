@@ -1,0 +1,95 @@
+---
+title: "nb_background"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This experiment evaluates the FDP and power of different approaches to detecting
+interaction effects in negative binomially distributed data. It is inspired by
+the 3 vs 3 differential expression simulation setup from the clipper paper, but
+with interaction effects between pairs of factors.
+
+### Data Generation
+
+We use the fact that the NB distribution arises from a poisson-gamma mixture.
+The idea is to generate sample $i$ for gene $j$ from
+\begin{align*}
+y_{ji} \sim \text{NB}\left(\mu_{j}, \mu_{j}^{-1}\right)
+\mu_{j}\left(x\right) &= X \beta_{j} \\
+\beta_{j} &\sim \text{Gamma}\left(\alpha_{j}, \lambda_{j})
+\end{align*}
+where $X$ is a design matrix with all the main and interaction effects. If there
+is no true interaction effect, then the corresponding coordinate of $\beta_{j} =
+0$. Notice that their is variation even among the null genes -- this is similar
+to the heterogeneous effect idea in the clipper simulations.
+
+Here are functions we use to generate these data.
+```{r}
+library(tidyverse)
+signal_props <- list("1" = 10, "-1" = 10, "0" = 180)
+```
+
+```{r}
+simulate_means <- function(X, signal_props, hyper) {
+  signs <- map2(names(signal_props), signal_props, ~ rep(.x, .y)) %>%
+    unlist() %>%
+    as.numeric()
+  
+  D <- ncol(X)
+  beta <- rgamma(D, hyper$alpha, hyper$beta)
+  result <- matrix(nrow = length(signs), ncol = nrow(X))
+  
+  n_affected <- length(hyper$affected)
+  for (j in seq_along(signs)) {
+    if (signs[j] == 1) {
+      beta[hyper$affected] <- rgamma(n_affected, hyper$up_scale * hyper$alpha, hyper$beta)
+    } else if (signs[j] == -1) {
+      beta[hyper$affected] <- rgamma(n_affected, hyper$down_scale * hyper$alpha, hyper$beta)
+    } else {
+      beta[hyper$affected] <- rep(0, n_affected)
+    }
+    
+    result[j, ] <- X %*% beta
+  }
+  
+  result
+}
+
+simulate_data <- function(mu) {
+  N <- ncol(mu)
+  J <- nrow(mu)
+  y <- matrix(0, J, N)
+  
+  for (i in seq_len(N)) {
+    for (j in seq_len(J)) {
+      y[j, i] <- rnbinom(1, mu = mu[j, i], size = mu[j, i] ^ -1)
+    }
+  }
+  
+  y
+}
+
+n_samples <- 16
+X_ <- data.frame(
+  A = c(rep(-1, n_samples / 2), rep(1, n_samples / 2)),
+  B = c(rep(-1, n_samples / 4), rep(1, n_samples / 4), rep(-1, n_samples / 4), rep(1, n_samples / 4))
+)
+X <- model.matrix(lm(rnorm(n_samples) ~ A * B, data = X_))
+X[X == -1] <- 0
+
+hyper <- list(alpha = 1, beta = 1, up_scale = 1.5, down_scale = 1.5 ^ -1, affected = 2:4)
+mu <- simulate_means(X, signal_props, hyper)
+y <- simulate_data(mu)
+```
+
+Genes 1 - 20 have real positive / negative effets. Everything else is a suprious
+relationship.
+
+```{r}
+heatmap(y)
+image(log(1 + t(y)))
+```
