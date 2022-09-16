@@ -29,6 +29,7 @@ to the heterogeneous effect idea in the clipper simulations.
 
 Here are functions we use to generate these data.
 ```{r}
+set.seed(123)
 library(tidyverse)
 library(DESeq2)
 ```
@@ -66,16 +67,17 @@ simulate_data <- function(mu, delta = 0.1) {
 ```
 
 ```{r}
-n_samples <- 4
-n_features <- 3e3
-n_sig <- 3e2
+n_samples <- 8
+n_features <- 1e4
+n_sig <- 1e2
 
-hyper <- list(alpha = 1, beta = .01, null_ix = 2)
+hyper <- list(alpha = 2, beta = .1, null_ix = 2)
 X <- matrix(1, nrow = n_samples, ncol = 2)
 X[1:(n_samples / 2), 2] <- 0
 assignment <- c(rep("nonnull", n_sig), rep("null", n_features - n_sig))
 mu <- simulate_means(X, assignment, hyper)
 y <- simulate_data(mu)
+hist(mu)
 ```
 
 
@@ -96,7 +98,7 @@ dds <- DESeqDataSetFromMatrix(
 hist(dds$pvalue)
 ```
 ```{r}
-q <- 0.05
+q <- 0.1
 R <- which(dds$padj < q)
 length(intersect(R, (n_sig + 1):n_features)) / length(R)
 ```
