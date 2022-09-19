@@ -48,7 +48,7 @@ simulate_means <- function(X, assignment, hyper) {
   result
 }
 
-simulate_data <- function(mu, delta = 0.05) {
+simulate_data <- function(mu, delta = 0.01) {
   N <- ncol(mu)
   J <- nrow(mu)
   y <- matrix(0, J, N)
@@ -67,7 +67,7 @@ simulate_data <- function(mu, delta = 0.05) {
 ```
 
 ```{r}
-n_samples <- 8
+n_samples <- 12
 n_features <- 1e4
 n_sig <- 1e3
 
@@ -76,36 +76,90 @@ X <- matrix(1, nrow = n_samples, ncol = 4)
 X[1:(n_samples / 2), 2] <- 0
 X[, 3] <- c(rep(1, n_samples / 4), rep(0, n_samples / 4), rep(1, n_samples / 4), rep(0, n_samples / 4))
 X[, 4] <- X[, 2] * X[, 3]
-
 assignment <- c(rep("nonnull", n_sig), rep("null", n_features - n_sig))
-mu <- simulate_means(X, assignment, hyper)
-y <- simulate_data(mu)
-hist(mu, breaks = 20)
-```
-
-
-```{r}
 coldata <- as.data.frame(X) %>%
   set_names("intercept", "factor1", "factor2", "interaction")
 
+mu <- simulate_means(X, assignment, hyper)
+y <- simulate_data(mu)
 dds <- DESeqDataSetFromMatrix(
   countData = y,
   colData = coldata, 
   design = ~ 1 + factor1 + factor2 + factor1:factor2
 ) %>%
-  DESeq(fitType = "local")
+  DESeq()
 res <- results(dds)
 ```
 ```{r}
 output <- list()
+
+n_reps <- 200
+ix <- 1
 qs <- seq(0.01, 0.2, by = 0.02)
-for (i in seq_along(qs)) {
-  R <- which(res$padj < qs[i])
-  output[[i]] <- data.frame(
-    "q"  = qs[i],
-    "FDP" = length(intersect(R, (n_sig + 1):n_features)) / length(R)
-  )
+
+for (rep in 1:n_reps) {
+  for (delta in c(0, 0.01)) {
+    print(rep)
+    mu <- simulate_means(X, assignment, hyper)
+    dds <- DESeqDataSetFromMatrix(
+      countData = simulate_data(mu, delta = delta),
+      colData = coldata, 
+      design = ~ 1 + factor1 + factor2 + factor1:factor2
+    ) %>%
+      DESeq(fitType = "local")
+    res <- results(dds)
+    
+    for (i in seq_along(qs)) {
+      R <- which(res$padj < qs[i])
+      output[[ix]] <- data.frame(
+        "delta" = delta,
+        "rep" = rep,
+        "q"  = qs[i],
+        "FDP" = length(intersect(R, (n_sig + 1):n_features)) / length(R)
+      )
+      ix <- ix + 1 
+    }
+  }
 }
 
-bind_rows(output)
+output <- bind_rows(output)
+output$FDP[is.na(output$FDP)] <- 0 # happens when there are no rejections
 ```
+```{r}
+#write_csv(output, "~/Downloads/simulation_output.csv")
+#output <- read_csv("~/Downloads/simulation_output.csv")
+```
+
+
+```{r, fig.width = 7, fig.height = 8}
+min_theme <- theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "#ffffff"),
+    panel.grid.major = element_line(color = "#e3e3e3"),
+    panel.grid.minor = element_blank()
+    )
+theme_set(min_theme)
+  
+line_data <- data.frame(
+  q = seq(0.01, .2, .02),
+  FDP = seq(0.01, .2, .02)
+)
+
+ggplot(output) +
+  geom_boxplot(aes(as.factor(q), FDP, fill = as.factor(delta)), size = 1, outlier.size = 2) +
+  geom_line(data = line_data, aes(as.factor(q), FDP), group = 1, col = "#F24738", size = 1.5) +
+  labs(
+    x = "Target False Discovery Rate",
+    y = "Actual False Discovery Proportion",
+    fill = "Zero-Inflation Probability"
+  ) +
+  scale_fill_manual(values = c("#03588C", "#04C4D9")) +
+  theme(
+    axis.title = element_text(size = 15),
+    axis.text = element_text(size = 12),
+    legend.position = "bottom"
+  )
+ggsave("~/Downloads/interaction_fdr_experiment.png", dpi = 500, width = 5, height = 6)
+  
+```
+
